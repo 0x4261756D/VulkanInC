@@ -15,6 +15,8 @@
 #define TRY_MSG(func, msg) do { int8_t res = (func); if(res != 0) { printf(msg "\n"); return res; } } while(0)
 #define ASSERT(condition) do { if(!(condition)) { return -1; } } while(0)
 #define ASSERT_MSG(condition, msg) do { if(!(condition)) { printf(msg "\n"); return -1; } } while(0)
+#define ASSERT_DEFER(condition) do { if(!(condition)) { return -1; } } while(0)
+#define ASSERT_MSG_DEFER(condition, msg) do { if(!(condition)) { printf(msg "\n"); ret = -1; goto cleanup; } } while(0)
 
 #define foreach(TYPE, ITEM, ITEMS, BODY) \
 for(size_t EVALUATOR(i, __LINE__) = 0; EVALUATOR(i, __LINE__) < LEN(ITEMS); EVALUATOR(i, __LINE__)++) { TYPE ITEM = ITEMS[EVALUATOR(i, __LINE__)]; \
@@ -44,7 +46,7 @@ for(size_t EVALUATOR(i, __LINE__) = 0; EVALUATOR(i, __LINE__) < LEN(ITEMS); EVAL
 #define arrayListDefineContains(TYPE) \
 bool EVALUATOR(arrayListContains, arrayList(TYPE))(arrayList(TYPE) list, TYPE item) \
 { \
-	for(int i = 0; i < list.count; i++) \
+	for(size_t i = 0; i < list.count; i++) \
 	{ \
 		if(list.items[i] == item) \
 		{ \
@@ -59,15 +61,15 @@ bool EVALUATOR(arrayListContains, arrayList(TYPE))(arrayList(TYPE) list, TYPE it
 { \
 	.count = 0, \
 	.capacity = 4, \
-	.items = malloc(ARRAY_LIST_INIT_CAPACITY), \
+	.items = (TYPE*)malloc(ARRAY_LIST_INIT_CAPACITY * sizeof(TYPE)), \
 }
-#define arrayListAppend(NAME, ITEM) \
+#define arrayListAppend(TYPE, NAME, ITEM) \
 do \
 { \
 	if((NAME).count >= (NAME).capacity) \
 	{ \
 		(NAME).capacity = ((NAME).capacity == 0) ? ARRAY_LIST_INIT_CAPACITY : ((NAME).capacity * 2); \
-		(NAME).items = realloc((NAME).items, (NAME.capacity)); \
+		(NAME).items = (TYPE*)realloc((NAME).items, (NAME.capacity) * sizeof(TYPE)); \
 	} \
 	(NAME).items[(NAME).count] = ITEM; \
 	(NAME).count += 1; \
@@ -92,8 +94,8 @@ do \
 
 DEFINE_OPTION(uint32_t);
 arrayListDefine(VkDeviceQueueCreateInfo)
-arrayListDefine(uint32_t);
-arrayListDefineContains(uint32_t);
+arrayListDefine(uint32_t)
+arrayListDefineContains(uint32_t)
 const uint32_t WIDTH = 800;
 const uint32_t HEIGHT = 600;
 const char* validationLayers[1] = {"VK_LAYER_KHRONOS_validation"};
@@ -234,21 +236,19 @@ int8_t pickPhysicalDevice(void)
 
 int8_t createLogicalDevice()
 {
+	int8_t ret = 0;
 	QueueFamilyIndices indices = findQueueFamilies(physicalDevice);
 	arrayListInit(VkDeviceQueueCreateInfo, queueCreateInfos);
 
 	arrayListInit(uint32_t, uniqueQueueFamilies);
-	arrayListAppend(uniqueQueueFamilies, OPT_VAL(indices.graphicsFamily));
+	arrayListAppend(uint32_t, uniqueQueueFamilies, OPT_VAL(indices.graphicsFamily));
 	uint32_t presentFamilyIndex = OPT_VAL(indices.presentFamily);
 	if(!arrayListContains(uint32_t, uniqueQueueFamilies, presentFamilyIndex))
 	{
-		arrayListAppend(uniqueQueueFamilies, OPT_VAL(indices.presentFamily));
+		arrayListAppend(uint32_t, uniqueQueueFamilies, OPT_VAL(indices.presentFamily));
 	}
-
-	arrayListFree(uniqueQueueFamilies);
-
 	float queuePriority = 1.0f;
-	for(int i = 0; i < uniqueQueueFamilies.count; i++)
+	for(size_t i = 0; i < uniqueQueueFamilies.count; i++)
 	{
 		VkDeviceQueueCreateInfo queueCreateInfo =
 		{
@@ -257,7 +257,7 @@ int8_t createLogicalDevice()
 			.queueCount = 1,
 			.pQueuePriorities = &queuePriority,
 		};
-		arrayListAppend(queueCreateInfos, queueCreateInfo);
+		arrayListAppend(VkDeviceQueueCreateInfo, queueCreateInfos, queueCreateInfo);
 	}
 	VkPhysicalDeviceFeatures deviceFeatures = {0};
 	VkDeviceCreateInfo createInfo =
@@ -270,10 +270,13 @@ int8_t createLogicalDevice()
 		.enabledLayerCount = LEN(validationLayers),
 		.ppEnabledLayerNames = validationLayers
 	};
-	ASSERT_MSG(vkCreateDevice(physicalDevice, &createInfo, nullptr, &device) == VK_SUCCESS, "Failed to create a logical device");
+	ASSERT_MSG_DEFER(vkCreateDevice(physicalDevice, &createInfo, nullptr, &device) == VK_SUCCESS, "Failed to create a logical device");
 	vkGetDeviceQueue(device, OPT_VAL(indices.graphicsFamily), 0, &graphicsQueue);
 	vkGetDeviceQueue(device, OPT_VAL(indices.presentFamily), 0, &presentQueue);
-	return 0;
+cleanup:
+	arrayListFree(uniqueQueueFamilies);
+	arrayListFree(queueCreateInfos);
+	return ret;
 }
 
 int8_t createSurface(void)

@@ -197,7 +197,8 @@ QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device)
 			OPT_ASSIGN(indices.graphicsFamily, i);
 		}
 		VkBool32 presentSupport = false;
-		if(vkGetPhysicalDeviceSurfaceSupportKHR(device, i, surface, &presentSupport))
+		vkGetPhysicalDeviceSurfaceSupportKHR(device, i, surface, &presentSupport);
+		if(presentSupport)
 		{
 			OPT_ASSIGN(indices.presentFamily, i);
 		}

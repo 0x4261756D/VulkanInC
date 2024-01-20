@@ -1,6 +1,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 #include <vulkan/vulkan_core.h>
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
@@ -20,19 +21,79 @@ for(size_t EVALUATOR(i, __LINE__) = 0; EVALUATOR(i, __LINE__) < LEN(ITEMS); EVAL
 	BODY \
 }
 
-#define OPT(TYPE) PASTER(TYPE, __OPT)
+#define OPT(TYPE) EVALUATOR(TYPE, OPT)
 #define OPT_ASSIGN(VAR, VAL) do { VAR.__hasValue = true; VAR.__value = (VAL); } while(0)
 #define OPT_OK(VAR) (VAR.__hasValue)
 #define OPT_VAL(VAR) (VAR.__value)
 #define OPT_MUST(LS, VAR, RS) if(!VAR.__hasValue) return -1; LS (VAR) RS 
 
-#define CREATE_OPTION(TYPE) typedef struct \
+#define DEFINE_OPTION(TYPE) typedef struct \
 { \
 	bool __hasValue; \
 	TYPE __value; \
 } OPT(TYPE)
 
-CREATE_OPTION(uint32_t);
+#define ARRAY_LIST_INIT_CAPACITY 4
+#define arrayList(TYPE) EVALUATOR(TYPE, AL)
+#define arrayListDefine(TYPE) typedef struct\
+{ \
+	size_t count; \
+	size_t capacity; \
+	TYPE* items; \
+} arrayList(TYPE);
+#define arrayListDefineContains(TYPE) \
+bool EVALUATOR(arrayListContains, arrayList(TYPE))(arrayList(TYPE) list, TYPE item) \
+{ \
+	for(int i = 0; i < list.count; i++) \
+	{ \
+		if(list.items[i] == item) \
+		{ \
+			return true; \
+		} \
+	} \
+	return false; \
+}
+#define arrayListContains(TYPE, LIST, ITEM) EVALUATOR(arrayListContains, arrayList(TYPE))(LIST, ITEM)
+
+#define arrayListInit(TYPE, NAME) arrayList(TYPE) NAME = \
+{ \
+	.count = 0, \
+	.capacity = 4, \
+	.items = malloc(ARRAY_LIST_INIT_CAPACITY), \
+}
+#define arrayListAppend(NAME, ITEM) \
+do \
+{ \
+	if((NAME).count >= (NAME).capacity) \
+	{ \
+		(NAME).capacity = ((NAME).capacity == 0) ? ARRAY_LIST_INIT_CAPACITY : ((NAME).capacity * 2); \
+		(NAME).items = realloc((NAME).items, (NAME.capacity)); \
+	} \
+	(NAME).items[(NAME).count] = ITEM; \
+	(NAME).count += 1; \
+} while(0)
+#define arrayListFree(NAME) \
+do \
+{ \
+	free((NAME).items); \
+	(NAME).count = 0; \
+	(NAME).capacity = ARRAY_LIST_INIT_CAPACITY; \
+} while(0)
+#define arrayListRemoveAt(NAME, INDEX) \
+do \
+{ \
+	ASSERT_MSG(INDEX < (NAME).count, "Attempted to access an index out of bounds"); \
+	if(INDEX != (NAME).count - 1) \
+	{ \
+		memmove(&((NAME).items) + INDEX, &((NAME).items) + INDEX + 1, ((NAME).count - INDEX - 1) * sizeof((NAME).items)); \
+	} \
+	(NAME).count -= 1; \
+} while(0)
+
+DEFINE_OPTION(uint32_t);
+arrayListDefine(VkDeviceQueueCreateInfo)
+arrayListDefine(uint32_t);
+arrayListDefineContains(uint32_t);
 const uint32_t WIDTH = 800;
 const uint32_t HEIGHT = 600;
 const char* validationLayers[1] = {"VK_LAYER_KHRONOS_validation"};
@@ -173,28 +234,45 @@ int8_t pickPhysicalDevice(void)
 
 int8_t createLogicalDevice()
 {
-	float queuePriority = 1.0f;
-	uint32_t graphicsFamilyIndex = OPT_VAL(findQueueFamilies(physicalDevice).graphicsFamily);
-	VkDeviceQueueCreateInfo queueCreateInfo =
+	QueueFamilyIndices indices = findQueueFamilies(physicalDevice);
+	arrayListInit(VkDeviceQueueCreateInfo, queueCreateInfos);
+
+	arrayListInit(uint32_t, uniqueQueueFamilies);
+	arrayListAppend(uniqueQueueFamilies, OPT_VAL(indices.graphicsFamily));
+	uint32_t presentFamilyIndex = OPT_VAL(indices.presentFamily);
+	if(!arrayListContains(uint32_t, uniqueQueueFamilies, presentFamilyIndex))
 	{
-		.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
-		.queueFamilyIndex = graphicsFamilyIndex,
-		.queueCount = 1,
-		.pQueuePriorities = &queuePriority,
-	};
+		arrayListAppend(uniqueQueueFamilies, OPT_VAL(indices.presentFamily));
+	}
+
+	arrayListFree(uniqueQueueFamilies);
+
+	float queuePriority = 1.0f;
+	for(int i = 0; i < uniqueQueueFamilies.count; i++)
+	{
+		VkDeviceQueueCreateInfo queueCreateInfo =
+		{
+			.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+			.queueFamilyIndex = uniqueQueueFamilies.items[i],
+			.queueCount = 1,
+			.pQueuePriorities = &queuePriority,
+		};
+		arrayListAppend(queueCreateInfos, queueCreateInfo);
+	}
 	VkPhysicalDeviceFeatures deviceFeatures = {0};
 	VkDeviceCreateInfo createInfo =
 	{
 		.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
-		.pQueueCreateInfos = &queueCreateInfo,
-		.queueCreateInfoCount = 1,
+		.pQueueCreateInfos = queueCreateInfos.items,
+		.queueCreateInfoCount = queueCreateInfos.count,
 		.pEnabledFeatures = &deviceFeatures,
 		.enabledExtensionCount = 0,
 		.enabledLayerCount = LEN(validationLayers),
 		.ppEnabledLayerNames = validationLayers
 	};
 	ASSERT_MSG(vkCreateDevice(physicalDevice, &createInfo, nullptr, &device) == VK_SUCCESS, "Failed to create a logical device");
-	vkGetDeviceQueue(device, graphicsFamilyIndex, 0, &graphicsQueue);
+	vkGetDeviceQueue(device, OPT_VAL(indices.graphicsFamily), 0, &graphicsQueue);
+	vkGetDeviceQueue(device, OPT_VAL(indices.presentFamily), 0, &presentQueue);
 	return 0;
 }
 

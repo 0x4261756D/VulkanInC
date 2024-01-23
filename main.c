@@ -108,6 +108,7 @@ arrayListDefineContains(uint32_t)
 arrayListDefine(VkSurfaceFormatKHR)
 arrayListDefine(VkPresentModeKHR)
 arrayListDefine(VkImage)
+arrayListDefine(VkImageView)
 const uint32_t WIDTH = 800;
 const uint32_t HEIGHT = 600;
 const char* validationLayers[1] = {"VK_LAYER_KHRONOS_validation"};
@@ -124,6 +125,7 @@ VkSwapchainKHR swapChain;
 arrayList(VkImage) swapChainImages;
 VkFormat swapChainImageFormat;
 VkExtent2D swapChainExtent;
+arrayList(VkImageView) swapChainImageViews;
 
 typedef struct
 {
@@ -465,6 +467,41 @@ cleanup:
 	return ret;
 }
 
+int8_t createImageViews(void)
+{
+	int ret = 0;
+	arrayListWithSize(VkImageView, swapChainImageViews, swapChainImages.count);
+	for(size_t i = 0; i < swapChainImages.count; i++)
+	{
+		VkImageViewCreateInfo createInfo =
+		{
+			.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+			.image = swapChainImages.items[i],
+			.viewType = VK_IMAGE_VIEW_TYPE_2D,
+			.format = swapChainImageFormat,
+			.components =
+			{
+				.r = VK_COMPONENT_SWIZZLE_IDENTITY,
+				.g = VK_COMPONENT_SWIZZLE_IDENTITY,
+				.b = VK_COMPONENT_SWIZZLE_IDENTITY,
+				.a = VK_COMPONENT_SWIZZLE_IDENTITY,
+			},
+			.subresourceRange =
+			{
+				.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+				.baseMipLevel = 0,
+				.levelCount = 1,
+				.baseArrayLayer = 0,
+				.layerCount = 1,
+			},
+		};
+		ASSERT_MSG_DEFER(vkCreateImageView(globalDevice, &createInfo, nullptr, &swapChainImageViews.items[i]) == VK_SUCCESS, "Failed to create image views");
+	}
+
+cleanup:
+	return ret;
+}
+
 int8_t initVulkan(void)
 {
 	TRY(createInstance());
@@ -472,6 +509,7 @@ int8_t initVulkan(void)
 	TRY(pickPhysicalDevice());
 	TRY(createLogicalDevice());
 	TRY(createSwapChain());
+	TRY(createImageViews());
 	return 0;
 }
 
@@ -485,6 +523,10 @@ void mainLoop(void)
 
 void cleanup(void)
 {
+	for(size_t i = 0; i < swapChainImageViews.count; i++)
+	{
+		vkDestroyImageView(globalDevice, swapChainImageViews.items[i], nullptr);
+	}
 	vkDestroySwapchainKHR(globalDevice, swapChain, nullptr);
 	vkDestroyDevice(globalDevice, nullptr);
 	vkDestroySurfaceKHR(instance, surface, nullptr);
@@ -492,6 +534,7 @@ void cleanup(void)
 	glfwDestroyWindow(window);
 	glfwTerminate();
 	arrayListFree(swapChainImages);
+	arrayListFree(swapChainImageViews);
 }
 
 uint8_t run(void)

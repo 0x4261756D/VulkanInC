@@ -109,6 +109,7 @@ arrayListDefine(VkSurfaceFormatKHR)
 arrayListDefine(VkPresentModeKHR)
 arrayListDefine(VkImage)
 arrayListDefine(VkImageView)
+arrayListDefine(VkFramebuffer)
 const uint32_t WIDTH = 800;
 const uint32_t HEIGHT = 600;
 const char* validationLayers[1] = {"VK_LAYER_KHRONOS_validation"};
@@ -129,6 +130,7 @@ arrayList(VkImageView) swapChainImageViews;
 VkRenderPass renderPass;
 VkPipelineLayout pipelineLayout;
 VkPipeline graphicsPipeline;
+arrayList(VkFramebuffer) swapChainFramebuffers;
 
 typedef struct
 {
@@ -748,6 +750,32 @@ int8_t createRenderPass(void)
 	return ret;
 }
 
+int8_t createFramebuffers(void)
+{
+	int8_t ret = 0;
+	for(size_t i = 0; i < swapChainImageViews.count; i++)
+	{
+		VkImageView attachments[] =
+		{
+			swapChainImageViews.items[i]
+		};
+		VkFramebufferCreateInfo framebufferInfo =
+		{
+			.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
+			.renderPass = renderPass,
+			.attachmentCount = 1,
+			.pAttachments = attachments,
+			.width = swapChainExtent.width,
+			.height = swapChainExtent.height,
+			.layers = 1
+		};
+		VkFramebuffer framebuffer;
+		ASSERT_MSG(vkCreateFramebuffer(globalDevice, &framebufferInfo, nullptr, &framebuffer) == VK_SUCCESS, "Failed to create framebuffer");
+		arrayListAppend(VkFramebuffer, swapChainFramebuffers, framebuffer);
+	}
+	return ret;
+}
+
 int8_t initVulkan(void)
 {
 	TRY(createInstance());
@@ -758,6 +786,7 @@ int8_t initVulkan(void)
 	TRY(createImageViews());
 	TRY(createRenderPass());
 	TRY(createGraphicsPipeline());
+	TRY(createFramebuffers());
 	return 0;
 }
 
@@ -771,6 +800,10 @@ void mainLoop(void)
 
 void cleanup(void)
 {
+	for(size_t i = 0; i < swapChainFramebuffers.count; i++)
+	{
+		vkDestroyFramebuffer(globalDevice, swapChainFramebuffers.items[i], nullptr);
+	}
 	vkDestroyPipeline(globalDevice, graphicsPipeline, nullptr);
 	vkDestroyPipelineLayout(globalDevice, pipelineLayout, nullptr);
 	vkDestroyRenderPass(globalDevice, renderPass, nullptr);
@@ -786,6 +819,7 @@ void cleanup(void)
 	glfwTerminate();
 	arrayListFree(swapChainImages);
 	arrayListFree(swapChainImageViews);
+	arrayListFree(swapChainFramebuffers);
 }
 
 uint8_t run(void)

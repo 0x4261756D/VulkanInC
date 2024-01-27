@@ -131,6 +131,8 @@ VkRenderPass renderPass;
 VkPipelineLayout pipelineLayout;
 VkPipeline graphicsPipeline;
 arrayList(VkFramebuffer) swapChainFramebuffers;
+VkCommandPool commandPool;
+VkCommandBuffer commandBuffer;
 
 typedef struct
 {
@@ -776,6 +778,70 @@ int8_t createFramebuffers(void)
 	return ret;
 }
 
+int8_t createCommandPool(void)
+{
+	int8_t ret = 0;
+	QueueFamilyIndices queuFamilyIndices = findQueueFamilies(physicalDevice);
+	VkCommandPoolCreateInfo poolInfo =
+	{
+		.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+		.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
+		.queueFamilyIndex = OPT_VAL(queuFamilyIndices.graphicsFamily),
+	};
+	ASSERT_MSG(vkCreateCommandPool(globalDevice, &poolInfo, nullptr, &commandPool) == VK_SUCCESS, "Failed to create a command pool");
+	return ret;
+}
+
+int8_t createCommandBuffer(void)
+{
+	int8_t ret = 0;
+	VkCommandBufferAllocateInfo allocInfo =
+	{
+		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+		.commandPool = commandPool,
+		.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+		.commandBufferCount = 1
+	};
+	ASSERT_MSG(vkAllocateCommandBuffers(globalDevice, &allocInfo, &commandBuffer) == VK_SUCCESS, "Failed to allocate command buffers");
+	return ret;
+}
+
+int8_t recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex)
+{
+	int8_t ret = 0;
+	VkCommandBufferBeginInfo beginInfo =
+	{
+		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+		.flags = 0,
+		.pInheritanceInfo = nullptr,
+	};
+	ASSERT_MSG(vkBeginCommandBuffer(commandBuffer, &beginInfo) == VK_SUCCESS, "Failed to begin recording command buffer");
+	VkClearValue clearColor = {{{0.0f, 0.0f, 0.0f, 1.0f}}};
+	VkRenderPassBeginInfo renderPassInfo =
+	{
+		.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
+		.renderPass = renderPass,
+		.framebuffer = swapChainFramebuffers.items[imageIndex],
+		.renderArea =
+		{
+			.offset =
+			{
+				.x = 0,
+				.y = 0,
+			},
+			.extent = swapChainExtent,
+		},
+		.clearValueCount = 1,
+		.pClearValues = &clearColor,
+	};
+	vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+	vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
+	vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+	vkCmdEndRenderPass(commandBuffer);
+	ASSERT_MSG(vkEndCommandBuffer(commandBuffer) == VK_SUCCESS, "Failed to record command buffer");
+	return ret;
+}
+
 int8_t initVulkan(void)
 {
 	TRY(createInstance());
@@ -787,6 +853,8 @@ int8_t initVulkan(void)
 	TRY(createRenderPass());
 	TRY(createGraphicsPipeline());
 	TRY(createFramebuffers());
+	TRY(createCommandPool());
+	TRY(createCommandBuffer());
 	return 0;
 }
 
@@ -800,6 +868,7 @@ void mainLoop(void)
 
 void cleanup(void)
 {
+	vkDestroyCommandPool(globalDevice, commandPool, nullptr);
 	for(size_t i = 0; i < swapChainFramebuffers.count; i++)
 	{
 		vkDestroyFramebuffer(globalDevice, swapChainFramebuffers.items[i], nullptr);

@@ -257,7 +257,7 @@ bool checkLayerValidationSupport()
 int8_t createInstance(void)
 {
 	ASSERT_MSG(checkLayerValidationSupport(), "validation layers requested but not available");
-	VkApplicationInfo appInfo = 
+	VkApplicationInfo appInfo =
 	{
 		.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
 		.pApplicationName = "Hello, World",

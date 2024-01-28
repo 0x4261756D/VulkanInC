@@ -149,6 +149,7 @@ arrayList(VkSemaphore) imageAvailableSemaphores;
 arrayList(VkSemaphore) renderFinishedSemaphores;
 arrayList(VkFence) inFlightFences;
 uint32_t currentFrame = 0;
+bool framebufferResized = false;
 
 typedef struct
 {
@@ -232,12 +233,20 @@ inline bool queueFamilyIndicesIsComplete(QueueFamilyIndices indices)
 	return OPT_OK(indices.graphicsFamily) && OPT_OK(indices.presentFamily);
 }
 
+static void framebufferResizeCallback(GLFWwindow* window, int width, int height)
+{
+	(void)window;
+	(void)width;
+	(void)height;
+	framebufferResized = true;
+}
+
 void initWindow(void)
 {
 	glfwInit();
 	glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-	glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
 	window = glfwCreateWindow(WIDTH, HEIGHT, "Hello, World", nullptr, nullptr);
+	glfwSetFramebufferSizeCallback(window, framebufferResizeCallback);
 }
 
 bool checkLayerValidationSupport()
@@ -781,6 +790,7 @@ int8_t createRenderPass(void)
 int8_t createFramebuffers(void)
 {
 	int8_t ret = 0;
+	arrayListInitGlobal(VkFramebuffer, swapChainFramebuffers);
 	for(size_t i = 0; i < swapChainImageViews.count; i++)
 	{
 		VkImageView attachments[] =
@@ -898,6 +908,42 @@ int8_t createSyncObjects(void)
 	return ret;
 }
 
+void cleanupSwapChain(void)
+{
+	for(size_t i = 0; i < swapChainFramebuffers.count; i++)
+	{
+		vkDestroyFramebuffer(globalDevice, swapChainFramebuffers.items[i], nullptr);
+	}
+	for(size_t i = 0; i < swapChainImageViews.count; i++)
+	{
+		vkDestroyImageView(globalDevice, swapChainImageViews.items[i], nullptr);
+	}
+	vkDestroySwapchainKHR(globalDevice, swapChain, nullptr);
+}
+
+int8_t recreateSwapChain(void)
+{
+	int width = 0;
+	int height = 0;
+	glfwGetFramebufferSize(window, &width, &height);
+	while(width == 0 || height == 0)
+	{
+		glfwGetFramebufferSize(window, &width, &height);
+		glfwWaitEvents();
+	}
+
+	vkDeviceWaitIdle(globalDevice);
+
+	cleanupSwapChain();
+
+	TRY(createSwapChain());
+	arrayListFree(swapChainImageViews);
+	TRY(createImageViews());
+	arrayListFree(swapChainFramebuffers);
+	TRY(createFramebuffers());
+	return 0;
+}
+
 int8_t initVulkan(void)
 {
 	TRY(createInstance());
@@ -920,9 +966,15 @@ int8_t drawFrame()
 	int8_t ret = 0;
 	//printf("Frame %d, fence: %p\n", currentFrame, &inFlightFences.items[currentFrame]);
 	ASSERT_MSG(vkWaitForFences(globalDevice, 1, &(inFlightFences.items[currentFrame]), VK_TRUE, UINT64_MAX) == VK_SUCCESS, "Could not wait for fences");
-	vkResetFences(globalDevice, 1, &(inFlightFences.items[currentFrame]));
 	uint32_t imageIndex;
-	vkAcquireNextImageKHR(globalDevice, swapChain, UINT64_MAX, imageAvailableSemaphores.items[currentFrame], VK_NULL_HANDLE, &imageIndex);
+	VkResult result = vkAcquireNextImageKHR(globalDevice, swapChain, UINT64_MAX, imageAvailableSemaphores.items[currentFrame], VK_NULL_HANDLE, &imageIndex);
+	if(result == VK_ERROR_OUT_OF_DATE_KHR)
+	{
+		recreateSwapChain();
+		return 0;
+	}
+	ASSERT_MSG(result == VK_SUCCESS || result == VK_SUBOPTIMAL_KHR, "Failed to acquire swap chain image");
+	vkResetFences(globalDevice, 1, &(inFlightFences.items[currentFrame]));
 	vkResetCommandBuffer(commandBuffers.items[currentFrame], 0);
 	recordCommandBuffer(commandBuffers.items[currentFrame], imageIndex);
 	VkSemaphore waitSemaphores[] = {imageAvailableSemaphores.items[currentFrame]};
@@ -951,7 +1003,16 @@ int8_t drawFrame()
 		.pImageIndices = &imageIndex,
 		.pResults = nullptr,
 	};
-	ASSERT_MSG(vkQueuePresentKHR(presentQueue, &presentInfo) == VK_SUCCESS, "Failed to present queue");
+	result = vkQueuePresentKHR(presentQueue, &presentInfo);
+	if(result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || framebufferResized)
+	{
+		framebufferResized = false;
+		recreateSwapChain();
+	}
+	else
+	{
+		ASSERT_MSG(result == VK_SUCCESS, "Failed to present swap chain image");
+	}
 	currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
 	return ret;
 }
@@ -972,6 +1033,7 @@ cleanup:
 
 void cleanup(void)
 {
+	cleanupSwapChain();
 	for(size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
 	{
 		vkDestroySemaphore(globalDevice, imageAvailableSemaphores.items[i], nullptr);
@@ -979,18 +1041,9 @@ void cleanup(void)
 		vkDestroyFence(globalDevice, inFlightFences.items[i], nullptr);
 	}
 	vkDestroyCommandPool(globalDevice, commandPool, nullptr);
-	for(size_t i = 0; i < swapChainFramebuffers.count; i++)
-	{
-		vkDestroyFramebuffer(globalDevice, swapChainFramebuffers.items[i], nullptr);
-	}
 	vkDestroyPipeline(globalDevice, graphicsPipeline, nullptr);
 	vkDestroyPipelineLayout(globalDevice, pipelineLayout, nullptr);
 	vkDestroyRenderPass(globalDevice, renderPass, nullptr);
-	for(size_t i = 0; i < swapChainImageViews.count; i++)
-	{
-		vkDestroyImageView(globalDevice, swapChainImageViews.items[i], nullptr);
-	}
-	vkDestroySwapchainKHR(globalDevice, swapChain, nullptr);
 	vkDestroyDevice(globalDevice, nullptr);
 	vkDestroySurfaceKHR(instance, surface, nullptr);
 	vkDestroyInstance(instance, nullptr);
